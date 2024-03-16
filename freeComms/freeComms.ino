@@ -103,26 +103,6 @@ void decryptData(uint8_t *plaintext, uint8_t *ciphertext) {
 }
 
 String makePayload(String payloadType, String channel, String dest_id, String payload) {
-  /*
-      Message type: 
-      0: System
-        00: alive
-        01: ACK ( crc20 message )
-        02: Freq hop
-      1: Functional by devce
-      2: Functional by user
-
-      meta
-        message type 3ch
-        timestamp
-        id sender
-        channel
-      data
-        payload type
-        payload data
-        retry
-
-    */
   return "[" + MSG_TYPE_POSITION + "," + DEVICE_ID + "," + msg_counter + "," + channel + "," + dest_id + "," + payload + "]";
 }
 
