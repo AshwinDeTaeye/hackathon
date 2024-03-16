@@ -66,59 +66,6 @@ void getInfo() {
   display.printf("BAT: %.0f%% %.2fV CPU:%.0f°C\n", vbatPerc, vbat, temperature);
 }
 
-String makePayload(String payloadType, String channel, String dest_id, String payload) {
-  /*
-      Message type: 
-      0: System
-        00: alive
-        01: ACK ( crc20 message )
-        02: Freq hop
-      1: Functional by devce
-      2: Functional by user
-
-      meta
-        message type 3ch
-        timestamp
-        id sender
-        channel
-      data
-        payload type
-        payload data
-        retry
-
-    */
-  return "[" + MSG_TYPE_POSITION + "," + DEVICE_ID + "," + msg_counter + "," + channel + "," + dest_id + "," + payload + "]";
-}
-
-
-void sendGpsData(String gpsData) {
-  String dataToEncrypt = makePayload("04", "", "", "payload");
-
-  /*
-      Message type: 
-      0: System
-        00: alive
-        01: ACK ( crc20 message )
-        02: Freq hop
-        03: Text
-        04: GPS
-        05: Temp
-      meta
-        message type 3ch
-        timestamp
-        id sender
-        channel
-      data
-        payload type
-        payload data
-        retry
-    */
-}
-
-
-void homeScreen() {
-}
-
 void encryptData(uint8_t *plaintext, uint8_t *ciphertext) {
   uint8_t iv[16] = { 0x23, 0x39, 0x52, 0xDE, 0xE4, 0xD5, 0xED, 0x5F,
                      0x9B, 0x9C, 0x6D, 0x6F, 0xF8, 0x0F, 0xF4, 0x78 };
@@ -155,6 +102,65 @@ void decryptData(uint8_t *plaintext, uint8_t *ciphertext) {
   */
 }
 
+String makePayload(String payloadType, String channel, String dest_id, String payload) {
+  /*
+      Message type: 
+      0: System
+        00: alive
+        01: ACK ( crc20 message )
+        02: Freq hop
+      1: Functional by devce
+      2: Functional by user
+
+      meta
+        message type 3ch
+        timestamp
+        id sender
+        channel
+      data
+        payload type
+        payload data
+        retry
+
+    */
+  return "[" + MSG_TYPE_POSITION + "," + DEVICE_ID + "," + msg_counter + "," + channel + "," + dest_id + "," + payload + "]";
+}
+
+
+void sendGpsData() {
+  String dataToEncrypt = makePayload("04", "", "", "1-1");
+  uint8_t encryptedData[kMessageLength] = "";
+
+  uint8_t *plaintext = (uint8_t *)dataToEncrypt.c_str();
+  encryptData(plaintext, encryptedData);
+  int inputStringLength = sizeof(encryptedData);
+  int encodedLength = Base64.encodedLength(inputStringLength);
+  char encodedString[encodedLength];
+
+  Base64.encode(encodedString, (char *)encryptedData, inputStringLength);
+
+  RADIOLIB(radio.transmit(encodedString, kMessageLength));
+
+  /*
+      Message type: 
+      0: System
+        00: alive
+        01: ACK ( crc20 message )
+        02: Freq hop
+        03: Text
+        04: GPS
+        05: Temp
+      meta
+        message type 3ch
+        timestamp
+        id sender
+        channel
+      data
+        payload type
+        payload data
+        retry
+    */
+}
 void setup() {
   heltec_setup();
   RADIOLIB_OR_HALT(radio.begin(434.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8 /* default is 8 */
@@ -173,6 +179,7 @@ void setup() {
   float temperature = temperatureRead();
   float vbatPerc = heltec_battery_percent();
   display.printf("BAT: %.0f%% %.2fV CPU:%.0f°C\n", vbatPerc, vbat, temperature);
+  sendGpsData();
 }
 
 void loop() {
@@ -247,7 +254,7 @@ void loop() {
     char encodedString[encodedLength];
 
     Base64.encode(encodedString, (char *)encryptedData, inputStringLength);
-    
+
     RADIOLIB(radio.transmit(encodedString, kMessageLength));
     tx_time = millis() - tx_time;
     heltec_led(0);
