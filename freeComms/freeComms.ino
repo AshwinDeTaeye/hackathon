@@ -3,6 +3,7 @@
 #include <EAX.h>
 #include <AES.h>
 #include <string.h>
+#include <Base64.h>
 
 // Turns the 'PRG' button into the power button, long press is off
 #define HELTEC_POWER_BUTTON  // must be before "#include <heltec.h>"
@@ -34,6 +35,10 @@
 // transmissting without an antenna can damage your hardware.
 #define TRANSMIT_POWER 22
 
+
+const uint8_t kMessageLength = 40;
+const uint8_t kAuthData = 1;
+
 EAX<AES256> eax;
 
 String rxdata;
@@ -45,6 +50,11 @@ uint64_t minimum_pause = 10;
 bool flashLight = 0;
 bool menu = 0;
 bool submenu = 0;
+String DEVICE_ID = "ZIC8154";
+String MSG_TYPE_POSITION = "MT01";
+String MSG_TYPE_PING = "MT02";
+String MSG_TYPE_TEST = "MT03";
+uint64_t msg_counter = 0;
 
 void getInfo() {
   both.printf("Frequency: %.2f MHz\n", FREQUENCY);
@@ -56,6 +66,56 @@ void getInfo() {
   display.printf("BAT: %.0f%% %.2fV CPU:%.0f°C\n", vbatPerc, vbat, temperature);
 }
 
+String makePayload(String payloadType, String channel, String dest_id, String payload) {
+  /*
+      Message type: 
+      0: System
+        00: alive
+        01: ACK ( crc20 message )
+        02: Freq hop
+      1: Functional by devce
+      2: Functional by user
+
+      meta
+        message type 3ch
+        timestamp
+        id sender
+        channel
+      data
+        payload type
+        payload data
+        retry
+
+    */
+  return "[" + MSG_TYPE_POSITION + "," + DEVICE_ID + "," + msg_counter + "," + channel + "," + dest_id + "," + payload + "]";
+}
+
+
+void sendGpsData(String gpsData) {
+  String dataToEncrypt = makePayload("04", "", "", "payload");
+
+  /*
+      Message type: 
+      0: System
+        00: alive
+        01: ACK ( crc20 message )
+        02: Freq hop
+        03: Text
+        04: GPS
+        05: Temp
+      meta
+        message type 3ch
+        timestamp
+        id sender
+        channel
+      data
+        payload type
+        payload data
+        retry
+    */
+}
+
+
 void homeScreen() {
 }
 
@@ -63,14 +123,14 @@ void encryptData(uint8_t *plaintext, uint8_t *ciphertext) {
   uint8_t iv[16] = { 0x23, 0x39, 0x52, 0xDE, 0xE4, 0xD5, 0xED, 0x5F,
                      0x9B, 0x9C, 0x6D, 0x6F, 0xF8, 0x0F, 0xF4, 0x78 };
   uint8_t tag[16] = { 0x00 };
-  uint8_t key[16] = "Yepla";
-  uint8_t authdata[20] = { 0x00 };
-
+  uint8_t key[16] = { 0x23, 0x39, 0x52, 0xDE, 0xE4, 0xD5, 0xED, 0x5F,
+                      0x9B, 0x9C, 0x6D, 0x6F, 0xF8, 0x0F };
+  uint8_t authdata[20] = { kAuthData };
   // Encrypt
   eax.setKey(key, sizeof(key));
   eax.setIV(iv, sizeof(iv));
   eax.addAuthData(authdata, sizeof(authdata));
-  eax.encrypt(ciphertext, plaintext, sizeof(plaintext));
+  eax.encrypt(ciphertext, plaintext, 40);
   eax.computeTag(tag, sizeof(tag));
 }
 
@@ -78,14 +138,15 @@ void decryptData(uint8_t *plaintext, uint8_t *ciphertext) {
   uint8_t iv[16] = { 0x23, 0x39, 0x52, 0xDE, 0xE4, 0xD5, 0xED, 0x5F,
                      0x9B, 0x9C, 0x6D, 0x6F, 0xF8, 0x0F, 0xF4, 0x78 };
   uint8_t tag[16] = { 0x00 };
-  uint8_t key[16] = "Yepla";
-  uint8_t authdata[20] = { 0x00 };
+  uint8_t key[16] = { 0x23, 0x39, 0x52, 0xDE, 0xE4, 0xD5, 0xED, 0x5F,
+                      0x9B, 0x9C, 0x6D, 0x6F, 0xF8, 0x0F };
+  uint8_t authdata[20] = { kAuthData };
 
   //Decrypt
   eax.setKey(key, sizeof(key));
   eax.setIV(iv, sizeof(iv));
   eax.addAuthData(authdata, sizeof(authdata));
-  eax.decrypt(plaintext, ciphertext, sizeof(ciphertext));
+  eax.decrypt(plaintext, ciphertext, kMessageLength);
   /*
   if (!eax.checkTag(tag, sizeof(tag))) {
     Serial.println("!! data is invalid");
@@ -96,7 +157,10 @@ void decryptData(uint8_t *plaintext, uint8_t *ciphertext) {
 
 void setup() {
   heltec_setup();
-  RADIOLIB_OR_HALT(radio.begin());
+  RADIOLIB_OR_HALT(radio.begin(434.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8 /* default is 8 */
+                               ,
+                               1.6, false));
+
   // Set the callback function for received packets
   radio.setDio1Action(rx);
   // Set radio parameters
@@ -142,37 +206,16 @@ void loop() {
     display.clear();
     heltec_led(30);  // 50% brightness is plenty for this LED
     tx_time = millis();
-    /*
-      Message type: 
-      0: System
-        00: alive
-        01: ACK ( crc20 message )
-        02: Freq hop
-      1: Functional by devce
-      2: Functional by user
 
-      meta
-        message type 3ch
-        timestamp
-        id sender
-        channel
-      data
-        payload type
-        payload data
-        retry
-
-    */
-    uint8_t plainText[20] = "Hello!";
-
-
-    uint8_t encryptedData[20] = "";
+    uint8_t plainText[kMessageLength] = "Hello!";
+    uint8_t encryptedData[kMessageLength] = "";
     encryptData(plainText, encryptedData);
-    char encryptedDataStr[21];  // one extra byte for the null terminator
-    memcpy(encryptedDataStr, encryptedData, 20);
-    encryptedDataStr[20] = '\0';  // null terminator
+    char encryptedDataStr[kMessageLength + 1];  // one extra byte for the null terminator
+    memcpy(encryptedDataStr, encryptedData, kMessageLength);
+    encryptedDataStr[kMessageLength] = '\0';  // null terminator
     RADIOLIB(radio.transmit(String(counter++).c_str()));
     tx_time = millis() - tx_time;
-    display.drawString(0, 20, "Meassage send!");
+    display.drawString(0, 20, "Message send!");
     display.display();
     delay(2000);
     button.update();
@@ -192,12 +235,20 @@ void loop() {
     radio.clearDio1Action();
     heltec_led(30);  // 50% brightness is plenty for this LED
     tx_time = millis();
-    uint8_t plainText[20] = "Test";
-    uint8_t encryptedData[20] = "";
-    encryptData(plainText, encryptedData);
-    Serial.println("encryptedData SEND:");
-    Serial.println((const char *)encryptedData);
-    RADIOLIB(radio.transmit((const char *)encryptedData));
+    uint8_t plainText[kMessageLength] = "Test";
+    uint8_t encryptedData[kMessageLength] = "";
+    String dataToEncrypt = makePayload("payloadType", "channel", "dest_id", "payload");
+
+    uint8_t *plaintext = (uint8_t *)dataToEncrypt.c_str();
+    encryptData(plaintext, encryptedData);
+
+    int inputStringLength = sizeof(encryptedData);
+    int encodedLength = Base64.encodedLength(inputStringLength);
+    char encodedString[encodedLength];
+
+    Base64.encode(encodedString, (char *)encryptedData, inputStringLength);
+    
+    RADIOLIB(radio.transmit(encodedString, kMessageLength));
     tx_time = millis() - tx_time;
     heltec_led(0);
     if (_radiolib_status == RADIOLIB_ERR_NONE) {
@@ -220,26 +271,30 @@ void loop() {
   if (rxFlag) {
     heltec_led(30);  // 50% brightness is plenty for this LED
     rxFlag = false;
-    radio.readData(rxdata);
-    Serial.println("rxdata");
-    Serial.println(rxdata);
-    Serial.println("rxdata length");
+    radio.readData(rxdata, kMessageLength);
+
+    int decodedLength = Base64.decodedLength((char *)rxdata.c_str(), rxdata.length());
+
+    char decodedString[decodedLength];
+    Base64.decode(decodedString, (char *)rxdata.c_str(), rxdata.length());
+    Serial.print("Decoded string is:\t");
+    Serial.println(decodedString);
+
+    uint8_t plainText[kMessageLength] = "";
+    uint8_t encryptedData[kMessageLength] = "";
+    Serial.print("Message length=");
     Serial.println(rxdata.length());
+    //
+    char encryptedDataStr[kMessageLength + 1];  // one extra byte for the null terminator
+    memcpy(encryptedDataStr, decodedString, kMessageLength);
 
-    uint8_t plainText[20] = "";
-    uint8_t encryptedData[20] = "";
-    memcpy(encryptedData, rxdata.c_str(), min(20, (int)rxdata.length()));
-    Serial.println("1Plaintext");
-    Serial.println((const char *)plainText);
-    Serial.println("1EncryptedData");
-    Serial.println((const char *)encryptedData);
-    decryptData(plainText, encryptedData);
-    Serial.println("2Plaintext");
-    Serial.println((const char *)plainText);
+    Serial.print("Message encryptedDataStr=");
+    Serial.println(encryptedDataStr);
 
-    Serial.println("2EncryptedData");
-    Serial.println((const char *)encryptedData);
+    encryptedDataStr[kMessageLength] = '\0';  // null terminator
 
+    // memcpy(decodedString, rxdata.c_str(), min((int)kMessageLength, (int)rxdata.length()));
+    decryptData(plainText, (unsigned char *)encryptedDataStr);
     if (_radiolib_status == RADIOLIB_ERR_NONE) {
       both.printf("RX [%s]\n", plainText);
       both.printf("  RSSI: %.2f dBm\n", radio.getRSSI());
