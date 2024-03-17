@@ -142,6 +142,30 @@ static Base64Class Base64;
 constexpr bool kIsDebug = true;
 constexpr bool kActivateTempRead = false;
 
+////////////////////////////////////////////////
+////////////////////////////////////////////////
+////////////////////////////////////////////////
+
+//const String DEVICE_ID = "ALA2";
+const String DEVICE_ID = "TRACKER";
+// const String DEVICE_ID = "ASHWIN";
+const String SERIAL_MESSAGE_KEYWORD_FOR_OUTPUT = "PAYLOAD==";
+constexpr bool kHasMic = false;
+constexpr bool kHasCamera = false;
+constexpr bool kIsTracker = true;
+const long kGpsCheckInterval = 2000;        // kGpsCheckInterval at which to blink (milliseconds)
+
+// TODO
+const String MSG_TYPE_GPS = "04";
+const String MSG_TYPE_SEN = "07";
+const String MSG_TYPE_TRK = "10";
+
+String MSG_TYPE_TEST = "MT03";
+
+////////////////////////////////////////////////
+////////////////////////////////////////////////
+////////////////////////////////////////////////
+
 
 // TCD
 #include <SoftwareSerial.h>
@@ -201,18 +225,9 @@ bool menu = 0;
 bool submenu = 0;
 bool isTracker = false;
 
-const String DEVICE_ID = "ALA2";
-const String SERIAL_MESSAGE_KEYWORD_FOR_OUTPUT = "PAYLOAD==";
-// const String DEVICE_ID = "ASHWIN";
-
-// TODO
-String MSG_TYPE_POSITION = "MT01";
-String MSG_TYPE_PING = "MT02";
-String MSG_TYPE_TEST = "MT03";
 uint64_t msg_counter = 0;
 
 unsigned long previousMillis = 0;  // will store last time GPS was updated
-const long interval = 1000;        // interval at which to blink (milliseconds)
 
 const int microphonePin = 1;
 const int kCameraPin = 7;
@@ -321,6 +336,8 @@ void receiveMessage(String messageEncrypted) {
     both.printf(" SNR: %.2f dB\n", radio.getSNR());
   }
 
+  // TODO check if TRK, then toggle tracking
+
   RADIOLIB_OR_HALT(radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF));
 }
 
@@ -340,12 +357,36 @@ void sendGpsData() {
   // Get the data from IC
   // String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + String(gps.date.month()) + "/" + String(gps.date.day()) + "," + String(gps.date.year()) + "," + String(gps.time.hour()) + ":" + String(gps.time.minute()) + ":" + String(gps.time.second());
 
-  if (valMic > micThreshold) {
-    Serial.print("Detected sound, we are sending the data! ");
-    const String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + valMic;
-    sendMessage(makePayload("04", "", "", assembledMessage));
+  const String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + valMic;
+
+  if (kIsTracker) {
+    if (kIsDebug) Serial.println("we are a tracker sending pos");
+    if (kIsDebug) Serial.println(assembledMessage);
+
+    sendMessage(makePayload(MSG_TYPE_GPS, "", "", assembledMessage));
   }
 
+  if (kHasMic) {
+    // Interval time elapsed, we check the sound
+    valMic = analogRead(microphonePin);
+
+    if (valMic > micThreshold) {
+      if (kIsDebug) Serial.println("sound detected sending pos");
+      if (kIsDebug) Serial.println(assembledMessage);
+
+      sendMessage(makePayload("07", "", "", assembledMessage));
+    }
+  }
+
+  if (kHasCamera) {
+    // TODO
+    if (valMic > micThreshold) {
+      if (kIsDebug) Serial.println("sound detected sending pos");
+      if (kIsDebug) Serial.println(assembledMessage);
+      
+      sendMessage(makePayload("07", "", "", assembledMessage));
+    }
+  }
 
   /*
       Message type: 
@@ -416,6 +457,8 @@ void setup() {
   ss.begin(GPSBaud);
 
   pinMode(microphonePin, INPUT);
+  pinMode(kCameraPin, INPUT);
+
   RADIOLIB_OR_HALT(radio.begin(434.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8 /* default is 8 */
                                ,
                                1.6, false));
@@ -552,11 +595,9 @@ void loop() {
   }
 
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
+  if (currentMillis - previousMillis >= kGpsCheckInterval) {
     // save the last time you blinked the LED
     previousMillis = currentMillis;
-    // Interval time elapsed, we check the GPS
-    valMic = analogRead(microphonePin);
     // save the last time you blinked the LED
     previousMillis = currentMillis;
     // Interval time elapsed, we check the GPS
