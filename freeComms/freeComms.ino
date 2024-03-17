@@ -147,12 +147,16 @@ constexpr bool kActivateTempRead = false;
 ////////////////////////////////////////////////
 
 //const String DEVICE_ID = "ALA2";
-const String DEVICE_ID = "TRACKER";
+//const String DEVICE_ID = "MIC1";
+const String DEVICE_ID = "REL";
+//const String DEVICE_ID = "CAM";
 // const String DEVICE_ID = "ASHWIN";
 const String SERIAL_MESSAGE_KEYWORD_FOR_OUTPUT = "PAYLOAD==";
 constexpr bool kHasMic = false;
 constexpr bool kHasCamera = false;
-constexpr bool kIsTracker = true;
+constexpr bool kHasGPS = false;
+
+constexpr bool kIsTracker = false;
 const long kGpsCheckInterval = 2000;        // kGpsCheckInterval at which to blink (milliseconds)
 
 // TODO
@@ -230,7 +234,7 @@ uint64_t msg_counter = 0;
 unsigned long previousMillis = 0;  // will store last time GPS was updated
 
 const int microphonePin = 1;
-const int kCameraPin = 7;
+const int kCameraPin = 3;
 int valMic = 0;
 int micThreshold = 985;
 // Add API
@@ -328,15 +332,13 @@ void receiveMessage(String messageEncrypted) {
 
   encryptedDataStr[kMessageLength] = '\0';  // null terminator
 
-  // memcpy(decodedString, rxdata.c_str(), min((int)kMessageLength, (int)rxdata.length()));
   decryptData(plainText, (unsigned char *)encryptedDataStr);
-  if (_radiolib_status == RADIOLIB_ERR_NONE) {
-    both.printf("RX [%s]\n", plainText);
-    both.printf(" RSSI: %.2f dBm\n", radio.getRSSI());
-    both.printf(" SNR: %.2f dB\n", radio.getSNR());
-  }
+  display.printf("RX [%s]\n", plainText);
+  display.printf(" RSSI: %.2f dBm\n", radio.getRSSI());
+  display.printf(" SNR: %.2f dB\n", radio.getSNR());
 
-  // TODO check if TRK, then toggle tracking
+  Serial.print(SERIAL_MESSAGE_KEYWORD_FOR_OUTPUT);
+  Serial.println((const char *)plainText);
 
   RADIOLIB_OR_HALT(radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF));
 }
@@ -347,6 +349,15 @@ String makePayload(String payloadType, String channel, String dest_id, String pa
   return "[" + payloadType + "," + DEVICE_ID + "," + msg_counter + "," + channel + "," + dest_id + "," + payload + "]\0";
 }
 
+static void smartDelay(unsigned long ms)
+{
+  unsigned long start = millis();
+  do 
+  {
+    while (ss.available())
+      gps.encode(ss.read());
+  } while (millis() - start < ms);
+}
 
 void sendGpsData() {
   if (kIsDebug) {
@@ -354,10 +365,27 @@ void sendGpsData() {
     Serial.print("microphone level: ");
     Serial.println(valMic);
   }
+
+  if (kHasGPS) {
+    Serial.print(F("Location: "));
+    if (gps.location.isValid()) {
+      Serial.print(gps.location.lat(), 6);
+      Serial.print(F(","));
+      Serial.print(gps.location.lng(), 6);
+    } else {
+      Serial.println(F("INVALID"));
+    }
+    smartDelay(200);
+  }
+
   // Get the data from IC
   // String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + String(gps.date.month()) + "/" + String(gps.date.day()) + "," + String(gps.date.year()) + "," + String(gps.time.hour()) + ":" + String(gps.time.minute()) + ":" + String(gps.time.second());
 
-  const String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + valMic;
+  String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + valMic;
+
+  if (!kHasGPS) {
+    assembledMessage = "51.155469,5.363265,0";
+  }
 
   if (kIsTracker) {
     if (kIsDebug) Serial.println("we are a tracker sending pos");
@@ -379,12 +407,11 @@ void sendGpsData() {
   }
 
   if (kHasCamera) {
-    // TODO
-    if (valMic > micThreshold) {
-      if (kIsDebug) Serial.println("sound detected sending pos");
-      if (kIsDebug) Serial.println(assembledMessage);
-      
-      sendMessage(makePayload("07", "", "", assembledMessage));
+    if (digitalRead(kCameraPin)) { 
+        if (kIsDebug) Serial.println("person detected sending pos");
+        if (kIsDebug) Serial.println(assembledMessage);
+        
+        sendMessage(makePayload("07", "", "", assembledMessage));
     }
   }
 
@@ -570,6 +597,11 @@ void loop() {
     // Maximum 1% duty cycle
     minimum_pause = tx_time * 10;
     last_tx = millis();
+
+    if (kHasGPS) {
+      smartDelay(200);
+    }
+
     radio.setDio1Action(rx);
     RADIOLIB_OR_HALT(radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF));
   }
@@ -591,11 +623,16 @@ void loop() {
       receiveMessage(decodedString);
     }
 
+    if (kHasGPS) {
+      smartDelay(100);
+    }
+
     heltec_led(0);
   }
 
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis >= kGpsCheckInterval) {
+   
     // save the last time you blinked the LED
     previousMillis = currentMillis;
     // save the last time you blinked the LED
