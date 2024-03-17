@@ -200,7 +200,7 @@ bool menu = 0;
 bool submenu = 0;
 
 
-const String DEVICE_ID = "ALAIN";
+const String DEVICE_ID = "ALA2";
 const String SERIAL_MESSAGE_KEYWORD_FOR_OUTPUT = "PAYLOAD==";
 
 // TODO
@@ -283,8 +283,12 @@ void sendMessage(const String & messageInClear)
 
   if (kIsDebug) Serial.println("before radio.transmit");
 
+  radio.clearDio1Action();
 
-  RADIOLIB(radio.transmit(base64EncodedString, kMessageLength));
+  RADIOLIB(radio.transmit(base64EncodedString, kMessageLength)); // this is blocking
+
+  radio.setDio1Action(rx);
+  RADIOLIB_OR_HALT(radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF));
 }
 
 void receiveMessage(String messageEncrypted) {
@@ -492,7 +496,6 @@ void loop() {
       both.printf("OK (%i ms)\n", tx_time);
       float vbat = heltec_vbat();
       both.printf("Battery: %.2f V\n\n", vbat);
-
     } else {
       both.printf("fail (%i)\n", _radiolib_status);
     }
@@ -514,7 +517,7 @@ void loop() {
     if (kIsDebug) Serial.print("decodedLength=");
     if (kIsDebug) Serial.println(decodedLength);
 
-    if (decodedLength) {
+    if (decodedLength > 0) {
       char decodedString[decodedLength];
       Base64.decode(decodedString, (char *)rxdata.c_str(), rxdata.length());
       receiveMessage(decodedString);
