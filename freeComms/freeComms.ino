@@ -142,6 +142,7 @@ static Base64Class Base64;
 constexpr bool kIsDebug = true;
 constexpr bool kActivateTempRead = false;
 
+
 // TCD
 #include <SoftwareSerial.h>
 #include <TinyGPSPlus.h>
@@ -184,7 +185,7 @@ static const uint32_t GPSBaud = 9600;
 TinyGPSPlus gps;
 SoftwareSerial ss(RXPin, TXPin);
 
-const uint8_t kMessageLength = 40;
+const uint8_t kMessageLength = 60;
 const uint8_t kAuthData = 1;
 
 EAX<AES256> eax;
@@ -198,6 +199,7 @@ uint64_t minimum_pause = 10;
 bool flashLight = 0;
 bool menu = 0;
 bool submenu = 0;
+bool isTracker = false;
 
 
 const String DEVICE_ID = "ALA2";
@@ -269,23 +271,27 @@ void sendMessage(const String & messageInClear)
 {
   if (kIsDebug) Serial.print("sendMessage - ");
   if (kIsDebug) Serial.println(messageInClear);
+  if (kIsDebug) Serial.println("strlen(messageInClear)");
+  if (kIsDebug) Serial.println(strlen(messageInClear.c_str()));
+
 
   uint8_t encryptedData[kMessageLength] = "";
 
   encryptData((uint8_t *)messageInClear.c_str(), encryptedData);
-  int inputStringLength = sizeof(encryptedData);
-  int encodedLength = Base64.encodedLength(inputStringLength);
+  const int inputStringLength = kMessageLength;
+  const int encodedLength = Base64.encodedLength(inputStringLength) + 1;
   char base64EncodedString[encodedLength];
 
   if (kIsDebug) Serial.println("before encode");
 
   Base64.encode(base64EncodedString, (char *)encryptedData, inputStringLength);
 
-  if (kIsDebug) Serial.println("before radio.transmit");
+  if (kIsDebug) Serial.print("base64EncodedString=");
+  if (kIsDebug) Serial.println(base64EncodedString);
 
-  radio.clearDio1Action();
+  //radio.clearDio1Action();
 
-  RADIOLIB(radio.transmit(base64EncodedString, kMessageLength)); // this is blocking
+  RADIOLIB(radio.transmit(base64EncodedString, encodedLength)); // this is blocking
 
   radio.setDio1Action(rx);
   RADIOLIB_OR_HALT(radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF));
@@ -319,7 +325,8 @@ void receiveMessage(String messageEncrypted) {
 
 
 String makePayload(String payloadType, String channel, String dest_id, String payload) {
-  return "[" + payloadType + "," + DEVICE_ID + "," + msg_counter + "," + channel + "," + dest_id + "," + payload + "]";
+  
+  return "[" + payloadType + "," + DEVICE_ID + "," + msg_counter + "," + channel + "," + dest_id + "," + payload + "]\0";
 }
 
 
