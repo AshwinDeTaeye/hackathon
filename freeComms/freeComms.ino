@@ -2,8 +2,8 @@
 ////////////////////////////////////////////////
 ////////////////////////////////////////////////
 static const char PROGMEM _Base64AlphabetTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                            "abcdefghijklmnopqrstuvwxyz"
-                                            "0123456789+/";
+                                                   "abcdefghijklmnopqrstuvwxyz"
+                                                   "0123456789+/";
 
 class Base64Class {
 public:
@@ -199,9 +199,7 @@ bool flashLight = 0;
 bool menu = 0;
 bool submenu = 0;
 
-
-const String DEVICE_ID = "ALAIN";
-const String SERIAL_MESSAGE_KEYWORD_FOR_OUTPUT = "PAYLOAD==";
+const String DEVICE_ID = "ASHWIN";
 
 // TODO
 String MSG_TYPE_POSITION = "MT01";
@@ -210,8 +208,11 @@ String MSG_TYPE_TEST = "MT03";
 uint64_t msg_counter = 0;
 
 unsigned long previousMillis = 0;  // will store last time GPS was updated
-const long interval = 3000;        // interval at which to blink (milliseconds)
+const long interval = 1000;        // interval at which to blink (milliseconds)
 
+const int microphonePin = 1;
+int valMic = 0;
+int micThreshold = 985;
 // Add API
 void getInfo() {
   both.printf("Frequency: %.2f MHz\n", FREQUENCY);
@@ -265,8 +266,7 @@ void decryptData(uint8_t *plaintext, uint8_t *ciphertext) {
 }
 
 
-void sendMessage(const String & messageInClear)
-{
+void sendMessage(const String &messageInClear) {
   if (kIsDebug) Serial.print("sendMessage - ");
   if (kIsDebug) Serial.println(messageInClear);
 
@@ -278,6 +278,7 @@ void sendMessage(const String & messageInClear)
   char base64EncodedString[encodedLength];
 
   if (kIsDebug) Serial.println("before encode");
+
 
   Base64.encode(base64EncodedString, (char *)encryptedData, inputStringLength);
 
@@ -291,23 +292,20 @@ void receiveMessage(String messageEncrypted) {
   if (kIsDebug) Serial.print("receiveMessage - ");
   if (kIsDebug) Serial.println(messageEncrypted);
 
+  uint8_t plainText[kMessageLength] = "";
+  uint8_t encryptedData[kMessageLength] = "";
+
+  char encryptedDataStr[kMessageLength + 1];  // one extra byte for the null terminator
+  memcpy(encryptedDataStr, messageEncrypted.c_str(), kMessageLength);
+
+  encryptedDataStr[kMessageLength] = '\0';  // null terminator
+
+  // memcpy(decodedString, rxdata.c_str(), min((int)kMessageLength, (int)rxdata.length()));
+  decryptData(plainText, (unsigned char *)encryptedDataStr);
   if (_radiolib_status == RADIOLIB_ERR_NONE) {
-    uint8_t plainText[kMessageLength] = "";
-    uint8_t encryptedData[kMessageLength] = "";
-
-    char encryptedDataStr[kMessageLength + 1];  // one extra byte for the null terminator
-    memcpy(encryptedDataStr, messageEncrypted.c_str(), kMessageLength);
-
-    encryptedDataStr[kMessageLength] = '\0';  // null terminator
-
-    // memcpy(decodedString, rxdata.c_str(), min((int)kMessageLength, (int)rxdata.length()));
-    decryptData(plainText, (unsigned char *)encryptedDataStr);
-    display.printf("RX [%s]\n", plainText);
-    display.printf(" RSSI: %.2f dBm\n", radio.getRSSI());
-    display.printf(" SNR: %.2f dB\n", radio.getSNR());
-
-    Serial.print(SERIAL_MESSAGE_KEYWORD_FOR_OUTPUT);
-    Serial.println((const char *)plainText);
+    both.printf("RX [%s]\n", plainText);
+    both.printf(" RSSI: %.2f dBm\n", radio.getRSSI());
+    both.printf(" SNR: %.2f dB\n", radio.getSNR());
   }
 
   RADIOLIB_OR_HALT(radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF));
@@ -320,14 +318,20 @@ String makePayload(String payloadType, String channel, String dest_id, String pa
 
 
 void sendGpsData() {
-  if (kIsDebug) Serial.println("before SendGPSData");
-
+  if (kIsDebug) {
+    Serial.println("In function SendGPSData()");
+    Serial.print("microphone level: ");
+    Serial.println(valMic);
+  }
   // Get the data from IC
   // String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + String(gps.date.month()) + "/" + String(gps.date.day()) + "," + String(gps.date.year()) + "," + String(gps.time.hour()) + ":" + String(gps.time.minute()) + ":" + String(gps.time.second());
 
-  const String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6);
+  if (valMic > micThreshold) {
+    Serial.print("Detected sound, we are sending the data! ");
+    const String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + valMic;
+    sendMessage(makePayload("04", "", "", assembledMessage));
+  }
 
-  sendMessage(makePayload("04", "", "", assembledMessage));
 
   /*
       Message type: 
@@ -339,6 +343,7 @@ void sendGpsData() {
         04: GPS
         05: Temp
         06: Person recog
+        07: Microphone
       meta
         message type 3ch
         timestamp
@@ -350,7 +355,6 @@ void sendGpsData() {
         retry
     */
 }
-
 
 void displayInfo() {
   Serial.print(F("Location: "));
@@ -480,11 +484,20 @@ void loop() {
     radio.clearDio1Action();
     heltec_led(30);  // 50% brightness is plenty for this LED
     tx_time = millis();
+    uint8_t plainText[kMessageLength] = "Test";
+    uint8_t encryptedData[kMessageLength] = "";
+    String dataToEncrypt = makePayload("payloadType", "channel", "dest_id", "payload");
 
-    const String dataToEncrypt = makePayload("payloadType", "channel", "dest_id", "payload");
+    uint8_t *plaintext = (uint8_t *)dataToEncrypt.c_str();
+    encryptData(plaintext, encryptedData);
 
-    sendMessage(dataToEncrypt);
+    int inputStringLength = sizeof(encryptedData);
+    int encodedLength = Base64.encodedLength(inputStringLength);
+    char encodedString[encodedLength];
 
+    Base64.encode(encodedString, (char *)encryptedData, inputStringLength);
+
+    RADIOLIB(radio.transmit(encodedString, kMessageLength));
     tx_time = millis() - tx_time;
     heltec_led(0);
     if (_radiolib_status == RADIOLIB_ERR_NONE) {
@@ -518,13 +531,17 @@ void loop() {
       char decodedString[decodedLength];
       Base64.decode(decodedString, (char *)rxdata.c_str(), rxdata.length());
       receiveMessage(decodedString);
-    } 
+    }
 
     heltec_led(0);
   }
 
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis >= interval) {
+    // save the last time you blinked the LED
+    previousMillis = currentMillis;
+    // Interval time elapsed, we check the GPS
+    valMic = analogRead(microphonePin);
     // save the last time you blinked the LED
     previousMillis = currentMillis;
     // Interval time elapsed, we check the GPS
