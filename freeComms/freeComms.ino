@@ -201,6 +201,7 @@ bool submenu = 0;
 
 
 const String DEVICE_ID = "ALAIN";
+const String SERIAL_MESSAGE_KEYWORD_FOR_OUTPUT = "PAYLOAD==";
 
 // TODO
 String MSG_TYPE_POSITION = "MT01";
@@ -278,7 +279,6 @@ void sendMessage(const String & messageInClear)
 
   if (kIsDebug) Serial.println("before encode");
 
-
   Base64.encode(base64EncodedString, (char *)encryptedData, inputStringLength);
 
   if (kIsDebug) Serial.println("before radio.transmit");
@@ -291,20 +291,23 @@ void receiveMessage(String messageEncrypted) {
   if (kIsDebug) Serial.print("receiveMessage - ");
   if (kIsDebug) Serial.println(messageEncrypted);
 
-  uint8_t plainText[kMessageLength] = "";
-  uint8_t encryptedData[kMessageLength] = "";
-
-  char encryptedDataStr[kMessageLength + 1];  // one extra byte for the null terminator
-  memcpy(encryptedDataStr, messageEncrypted.c_str(), kMessageLength);
-
-  encryptedDataStr[kMessageLength] = '\0';  // null terminator
-
-  // memcpy(decodedString, rxdata.c_str(), min((int)kMessageLength, (int)rxdata.length()));
-  decryptData(plainText, (unsigned char *)encryptedDataStr);
   if (_radiolib_status == RADIOLIB_ERR_NONE) {
-    both.printf("RX [%s]\n", plainText);
-    both.printf(" RSSI: %.2f dBm\n", radio.getRSSI());
-    both.printf(" SNR: %.2f dB\n", radio.getSNR());
+    uint8_t plainText[kMessageLength] = "";
+    uint8_t encryptedData[kMessageLength] = "";
+
+    char encryptedDataStr[kMessageLength + 1];  // one extra byte for the null terminator
+    memcpy(encryptedDataStr, messageEncrypted.c_str(), kMessageLength);
+
+    encryptedDataStr[kMessageLength] = '\0';  // null terminator
+
+    // memcpy(decodedString, rxdata.c_str(), min((int)kMessageLength, (int)rxdata.length()));
+    decryptData(plainText, (unsigned char *)encryptedDataStr);
+    display.printf("RX [%s]\n", plainText);
+    display.printf(" RSSI: %.2f dBm\n", radio.getRSSI());
+    display.printf(" SNR: %.2f dB\n", radio.getSNR());
+
+    Serial.print(SERIAL_MESSAGE_KEYWORD_FOR_OUTPUT);
+    Serial.println((const char *)plainText);
   }
 
   RADIOLIB_OR_HALT(radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF));
@@ -477,20 +480,11 @@ void loop() {
     radio.clearDio1Action();
     heltec_led(30);  // 50% brightness is plenty for this LED
     tx_time = millis();
-    uint8_t plainText[kMessageLength] = "Test";
-    uint8_t encryptedData[kMessageLength] = "";
-    String dataToEncrypt = makePayload("payloadType", "channel", "dest_id", "payload");
 
-    uint8_t *plaintext = (uint8_t *)dataToEncrypt.c_str();
-    encryptData(plaintext, encryptedData);
+    const String dataToEncrypt = makePayload("payloadType", "channel", "dest_id", "payload");
 
-    int inputStringLength = sizeof(encryptedData);
-    int encodedLength = Base64.encodedLength(inputStringLength);
-    char encodedString[encodedLength];
+    sendMessage(dataToEncrypt);
 
-    Base64.encode(encodedString, (char *)encryptedData, inputStringLength);
-
-    RADIOLIB(radio.transmit(encodedString, kMessageLength));
     tx_time = millis() - tx_time;
     heltec_led(0);
     if (_radiolib_status == RADIOLIB_ERR_NONE) {
