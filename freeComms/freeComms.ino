@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////
 ////////////////////////////////////////////////
 ////////////////////////////////////////////////
-const char PROGMEM _Base64AlphabetTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+static const char PROGMEM _Base64AlphabetTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                                             "abcdefghijklmnopqrstuvwxyz"
                                             "0123456789+/";
 
@@ -139,7 +139,7 @@ static Base64Class Base64;
 /**
  * kIsDebug turns debug prints on or off
  */
-constexpr bool kIsDebug = false;
+constexpr bool kIsDebug = true;
 constexpr bool kActivateTempRead = false;
 
 // TCD
@@ -198,7 +198,11 @@ uint64_t minimum_pause = 10;
 bool flashLight = 0;
 bool menu = 0;
 bool submenu = 0;
-String DEVICE_ID = "ZIC8154";
+
+
+const String DEVICE_ID = "ALAIN";
+
+// TODO
 String MSG_TYPE_POSITION = "MT01";
 String MSG_TYPE_PING = "MT02";
 String MSG_TYPE_TEST = "MT03";
@@ -229,8 +233,11 @@ void encryptData(uint8_t *plaintext, uint8_t *ciphertext) {
   eax.setKey(key, sizeof(key));
   eax.setIV(iv, sizeof(iv));
   eax.addAuthData(authdata, sizeof(authdata));
-  eax.encrypt(ciphertext, plaintext, 40);
+  eax.encrypt(ciphertext, plaintext, kMessageLength);
   eax.computeTag(tag, sizeof(tag));
+
+  if (kIsDebug) Serial.print("encryptData - ");
+  if (kIsDebug) Serial.println((const char *)ciphertext);
 }
 
 void decryptData(uint8_t *plaintext, uint8_t *ciphertext) {
@@ -252,29 +259,73 @@ void decryptData(uint8_t *plaintext, uint8_t *ciphertext) {
     // The data was invalid - do not use it.
   }
   */
+  if (kIsDebug) Serial.print("decryptData: ");
+  if (kIsDebug) Serial.println((const char *)plaintext);
 }
 
+
+void sendMessage(const String & messageInClear)
+{
+  if (kIsDebug) Serial.print("sendMessage - ");
+  if (kIsDebug) Serial.println(messageInClear);
+
+  uint8_t encryptedData[kMessageLength] = "";
+
+  encryptData((uint8_t *)messageInClear.c_str(), encryptedData);
+  int inputStringLength = sizeof(encryptedData);
+  int encodedLength = Base64.encodedLength(inputStringLength);
+  char base64EncodedString[encodedLength];
+
+  if (kIsDebug) Serial.println("before encode");
+
+
+  Base64.encode(base64EncodedString, (char *)encryptedData, inputStringLength);
+
+  if (kIsDebug) Serial.println("before radio.transmit");
+
+
+  RADIOLIB(radio.transmit(base64EncodedString, kMessageLength));
+}
+
+void receiveMessage(String messageEncrypted) {
+  if (kIsDebug) Serial.print("receiveMessage - ");
+  if (kIsDebug) Serial.println(messageEncrypted);
+
+  uint8_t plainText[kMessageLength] = "";
+  uint8_t encryptedData[kMessageLength] = "";
+
+  char encryptedDataStr[kMessageLength + 1];  // one extra byte for the null terminator
+  memcpy(encryptedDataStr, messageEncrypted.c_str(), kMessageLength);
+
+  encryptedDataStr[kMessageLength] = '\0';  // null terminator
+
+  // memcpy(decodedString, rxdata.c_str(), min((int)kMessageLength, (int)rxdata.length()));
+  decryptData(plainText, (unsigned char *)encryptedDataStr);
+  if (_radiolib_status == RADIOLIB_ERR_NONE) {
+    both.printf("RX [%s]\n", plainText);
+    both.printf(" RSSI: %.2f dBm\n", radio.getRSSI());
+    both.printf(" SNR: %.2f dB\n", radio.getSNR());
+  }
+
+  RADIOLIB_OR_HALT(radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF));
+}
+
+
 String makePayload(String payloadType, String channel, String dest_id, String payload) {
-  return "[" + MSG_TYPE_POSITION + "," + DEVICE_ID + "," + msg_counter + "," + channel + "," + dest_id + "," + payload + "]";
+  return "[" + payloadType + "," + DEVICE_ID + "," + msg_counter + "," + channel + "," + dest_id + "," + payload + "]";
 }
 
 
 void sendGpsData() {
+  if (kIsDebug) Serial.println("before SendGPSData");
+
   // Get the data from IC
-  String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + String(gps.date.month()) + "/" + String(gps.date.day()) + "," + String(gps.date.year()) + "," + String(gps.time.hour()) + ":" + String(gps.time.minute()) + ":" + String(gps.time.second());
+  // String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + String(gps.date.month()) + "/" + String(gps.date.day()) + "," + String(gps.date.year()) + "," + String(gps.time.hour()) + ":" + String(gps.time.minute()) + ":" + String(gps.time.second());
 
-  String dataToEncrypt = makePayload("04", "", "", assembledMessage);
-  uint8_t encryptedData[kMessageLength] = "";
+  const String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6);
 
-  uint8_t *plaintext = (uint8_t *)dataToEncrypt.c_str();
-  encryptData(plaintext, encryptedData);
-  int inputStringLength = sizeof(encryptedData);
-  int encodedLength = Base64.encodedLength(inputStringLength);
-  char encodedString[encodedLength];
+  sendMessage(makePayload("04", "", "", assembledMessage));
 
-  Base64.encode(encodedString, (char *)encryptedData, inputStringLength);
-
-  RADIOLIB(radio.transmit(encodedString, kMessageLength));
   /*
       Message type: 
       0: System
@@ -363,20 +414,10 @@ void setup() {
       Serial.println("HS not available");
   }
   */
-  Serial.println("sendGpsData called");
-  sendGpsData();
 }
 
 void loop() {
   heltec_loop();
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
-    // save the last time you blinked the LED
-    previousMillis = currentMillis;
-    // Interval time elapsed, we check the GPS
-    sendGpsData();
-  }
-
 
   if (menu == 1 && button.isDoubleClick()) {
     menu = 0;
@@ -474,28 +515,26 @@ void loop() {
     rxFlag = false;
     radio.readData(rxdata, kMessageLength);
 
-    int decodedLength = Base64.decodedLength((char *)rxdata.c_str(), rxdata.length());
+    const int decodedLength = Base64.decodedLength((char *)rxdata.c_str(), rxdata.length());
 
-    char decodedString[decodedLength];
-    Base64.decode(decodedString, (char *)rxdata.c_str(), rxdata.length());
+    if (kIsDebug) Serial.print("decodedLength=");
+    if (kIsDebug) Serial.println(decodedLength);
 
-    uint8_t plainText[kMessageLength] = "";
-    uint8_t encryptedData[kMessageLength] = "";
+    if (decodedLength) {
+      char decodedString[decodedLength];
+      Base64.decode(decodedString, (char *)rxdata.c_str(), rxdata.length());
+      receiveMessage(decodedString);
+    } 
 
-    char encryptedDataStr[kMessageLength + 1];  // one extra byte for the null terminator
-    memcpy(encryptedDataStr, decodedString, kMessageLength);
-
-    encryptedDataStr[kMessageLength] = '\0';  // null terminator
-
-    // memcpy(decodedString, rxdata.c_str(), min((int)kMessageLength, (int)rxdata.length()));
-    decryptData(plainText, (unsigned char *)encryptedDataStr);
-    if (_radiolib_status == RADIOLIB_ERR_NONE) {
-      both.printf("RX [%s]\n", plainText);
-      both.printf("  RSSI: %.2f dBm\n", radio.getRSSI());
-      both.printf("  SNR: %.2f dB\n", radio.getSNR());
-    }
-    RADIOLIB_OR_HALT(radio.startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF));
     heltec_led(0);
+  }
+
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= interval) {
+    // save the last time you blinked the LED
+    previousMillis = currentMillis;
+    // Interval time elapsed, we check the GPS
+    sendGpsData();
   }
 }
 
