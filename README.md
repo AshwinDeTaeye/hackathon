@@ -1,46 +1,28 @@
 
+# Communication System Message Structure
 
-Message structure
+## Prioritization
 
-  Priorization
-    DESTINATION_ID:   A DEVICE_ID to which the message is intended specifically
-    CHANNEL:          A string. Let all receiving devices organise the data by CHANNEL and SENDER_ID
-    Some channel names are reserved:
-      _DEF     DEFAULT           This means it does not have a channel with intention
-      _COP     COMBAT OUTPOST    These messages are means for the field analysis, typically for sensor data aggregation
-      _SYS     SYSTEM            These messages are meant for the system to maintain. Messages payload data have Key-Value structure
+- **DESTINATION_ID**: A DEVICE_ID for which the message is specifically intended.
+- **CHANNEL**: Organizes data by CHANNEL and SENDER_ID for all receiving devices.
+  - Reserved Channel Names:
+    - `_DEF` (DEFAULT): General-purpose messages without a specific channel.
+    - `_COP` (COMBAT OUTPOST): For field analysis, typically sensor data aggregation.
+    - `_SYS` (SYSTEM): System maintenance messages, typically key-value data.
 
+## Message Types and Payload
 
-  MESSAGE_TYPE | DESC             | DATA
-    00         | PING             | /
-    01         | ACK              | SENDER_ID:MSG_ID
-    02         | FRQHOP           | New frequency
-    03         | GPS              | x.xxxxx:y.yyyyy
-    04         | TXT              | You know what it is
+- **MESSAGE_TYPE**: Indicates the purpose of the message (`PNG`, `ACK`, `HOP`, `GPS`, `TXT`).
+- **DATA**: Varies based on MESSAGE_TYPE.
 
-  Message payload structure
+## Message Payload Structure
 
-    MESSAGE_TYPE , SENDER_ID , MSG_ID , CHANNEL , DESTINATION_ID , DATA , RETRY
+Formatted as `MESSAGE_TYPE,SENDER_ID,MSG_ID,CHANNEL,DESTINATION_ID,DATA,RETRY`.
 
+## Examples Corrected
 
-
-  Examples
-
-Ping:
- 00,001,xx,channel,,0
-
-// Only for destination
- ACK:
- 01 231231231231 Channel 0 hfzhkfkezhfkhekjhezkjhekj 5
-
- // Only for destination
- Freq:
- 02 231231231231 Channel 0 hfzhkfkezhfkhekjhezkjhekj 5
-
- // GPS
- Freq:
- 03 1231231231231 Channel 0 hfzhkfkezhfkhekjhezkjhekj 5
-
- // Text
- Freq:
- 04 1231231231231 Channel 0 This is text 5
+- **Ping**: `00,001,xx,_DEF,,/`
+- **ACK (Only for destination)**: `01,231231231231,_DEF,,SENDER_ID:MSG_ID,5`
+- **Frequency Hop (Only for destination)**: `02,231231231231,_DEF,,New frequency,5`
+- **GPS**: `03,1231231231231,_DEF,,x.xxxxx:y.yyyyy,5`
+- **Text Message**: `04,1231231231231,_DEF,,This is text,5`
