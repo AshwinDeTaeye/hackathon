@@ -1,3 +1,5 @@
+#include <SoftwareSerial.h>
+#include <TinyGPSPlus.h>
 // TCD
 #include <Crypto.h>
 #include <EAX.h>
@@ -35,6 +37,11 @@
 // transmissting without an antenna can damage your hardware.
 #define TRANSMIT_POWER 22
 
+static const int RXPin = 19, TXPin = 20;
+static const uint32_t GPSBaud = 9600;
+
+TinyGPSPlus gps;
+SoftwareSerial ss(RXPin, TXPin);
 
 const uint8_t kMessageLength = 40;
 const uint8_t kAuthData = 1;
@@ -56,6 +63,10 @@ String MSG_TYPE_PING = "MT02";
 String MSG_TYPE_TEST = "MT03";
 uint64_t msg_counter = 0;
 
+unsigned long previousMillis = 0;  // will store last time GPS was updated
+const long interval = 3000;        // interval at which to blink (milliseconds)
+
+// Add API
 void getInfo() {
   both.printf("Frequency: %.2f MHz\n", FREQUENCY);
   both.printf("Bandwidth: %.1f kHz\n", BANDWIDTH);
@@ -108,7 +119,10 @@ String makePayload(String payloadType, String channel, String dest_id, String pa
 
 
 void sendGpsData() {
-  String dataToEncrypt = makePayload("04", "", "", "1-1");
+  // Get the data from IC
+  String assembledMessage = String(gps.location.lat(), 6) + "," + String(gps.location.lng(), 6) + "," + String(gps.date.month()) + "/" + String(gps.date.day()) + "," + String(gps.date.year()) + "," + String(gps.time.hour()) + ":" + String(gps.time.minute()) + ":" + String(gps.time.second());
+
+  String dataToEncrypt = makePayload("04", "", "", assembledMessage);
   uint8_t encryptedData[kMessageLength] = "";
 
   uint8_t *plaintext = (uint8_t *)dataToEncrypt.c_str();
@@ -120,7 +134,6 @@ void sendGpsData() {
   Base64.encode(encodedString, (char *)encryptedData, inputStringLength);
 
   RADIOLIB(radio.transmit(encodedString, kMessageLength));
-
   /*
       Message type: 
       0: System
@@ -130,6 +143,7 @@ void sendGpsData() {
         03: Text
         04: GPS
         05: Temp
+        06: Person recog
       meta
         message type 3ch
         timestamp
@@ -141,8 +155,52 @@ void sendGpsData() {
         retry
     */
 }
+
+
+void displayInfo() {
+  Serial.print(F("Location: "));
+  if (gps.location.isValid()) {
+    Serial.print(gps.location.lat(), 6);
+    Serial.print(F(","));
+    Serial.print(gps.location.lng(), 6);
+  } else {
+    Serial.print(F("INVALID"));
+  }
+
+  Serial.print(F("  Date/Time: "));
+  if (gps.date.isValid()) {
+    Serial.print(gps.date.month());
+    Serial.print(F("/"));
+    Serial.print(gps.date.day());
+    Serial.print(F("/"));
+    Serial.print(gps.date.year());
+  } else {
+    Serial.print(F("INVALID"));
+  }
+
+  Serial.print(F(" "));
+  if (gps.time.isValid()) {
+    if (gps.time.hour() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.hour());
+    Serial.print(F(":"));
+    if (gps.time.minute() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.minute());
+    Serial.print(F(":"));
+    if (gps.time.second() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.second());
+    Serial.print(F("."));
+    if (gps.time.centisecond() < 10) Serial.print(F("0"));
+    Serial.print(gps.time.centisecond());
+  } else {
+    Serial.print(F("INVALID"));
+  }
+
+  Serial.println();
+}
+
 void setup() {
   heltec_setup();
+  ss.begin(GPSBaud);
   RADIOLIB_OR_HALT(radio.begin(434.0, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8 /* default is 8 */
                                ,
                                1.6, false));
@@ -159,11 +217,26 @@ void setup() {
   float temperature = temperatureRead();
   float vbatPerc = heltec_battery_percent();
   display.printf("BAT: %.0f%% %.2fV CPU:%.0f°C\n", vbatPerc, vbat, temperature);
+  /*
+  while (hs.available()) {
+      Serial.println("HS not available");
+  }
+  */
+  Serial.println("sendGpsData called");
   sendGpsData();
 }
 
 void loop() {
   heltec_loop();
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= interval) {
+    // save the last time you blinked the LED
+    previousMillis = currentMillis;
+    // Interval time elapsed, we check the GPS
+    sendGpsData();
+  }
+
+
   if (menu == 1 && button.isDoubleClick()) {
     menu = 0;
   } else {
@@ -264,19 +337,12 @@ void loop() {
 
     char decodedString[decodedLength];
     Base64.decode(decodedString, (char *)rxdata.c_str(), rxdata.length());
-    Serial.print("Decoded string is:\t");
-    Serial.println(decodedString);
 
     uint8_t plainText[kMessageLength] = "";
     uint8_t encryptedData[kMessageLength] = "";
-    Serial.print("Message length=");
-    Serial.println(rxdata.length());
-    //
+
     char encryptedDataStr[kMessageLength + 1];  // one extra byte for the null terminator
     memcpy(encryptedDataStr, decodedString, kMessageLength);
-
-    Serial.print("Message encryptedDataStr=");
-    Serial.println(encryptedDataStr);
 
     encryptedDataStr[kMessageLength] = '\0';  // null terminator
 
